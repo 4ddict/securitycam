@@ -3,16 +3,18 @@ set -e
 
 PROJECT_DIR="$HOME/securitycam"
 SERVICE_NAME="cam.service"
-STREAM_PORT=8080
+WRAPPER_SCRIPT="$PROJECT_DIR/run_cam.sh"
+CONFIG_FILE="$HOME/.cam_config"
 PYTHON=$(which python3)
 
 function uninstall() {
     echo "🧹 Uninstalling..."
-    sudo systemctl stop cam.service || true
-    sudo systemctl disable cam.service || true
+    sudo systemctl stop $SERVICE_NAME || true
+    sudo systemctl disable $SERVICE_NAME || true
     sudo rm -f /etc/systemd/system/$SERVICE_NAME
     sudo systemctl daemon-reload
     rm -rf "$PROJECT_DIR"
+    rm -f "$CONFIG_FILE"
     echo "✅ Uninstalled successfully."
     exit 0
 }
@@ -20,7 +22,7 @@ function uninstall() {
 function install_deps() {
     echo "📦 Installing dependencies..."
     sudo apt update
-    sudo apt install -y libcamera-apps python3 python3-pip python3-flask
+    sudo apt install -y libcamera-apps vlc python3 python3-pip python3-flask
 }
 
 function create_web_ui() {
@@ -40,7 +42,7 @@ function create_web_ui() {
     <h1 class="mb-4">📷 SecurityCam</h1>
     <div class="row">
       <div class="col-md-8">
-        <img src="http://{{ host }}:${STREAM_PORT}/stream.mjpg" class="img-fluid border">
+        <img src="http://{{ host }}:8080/stream.mjpg" class="img-fluid border">
       </div>
       <div class="col-md-4">
         <form method="post" action="/set">
@@ -68,7 +70,6 @@ EOF
     cat <<EOF > "$PROJECT_DIR/app/server.py"
 from flask import Flask, render_template, request, redirect
 import os
-import subprocess
 
 app = Flask(__name__)
 config_path = os.path.expanduser("~/.cam_config")
@@ -88,6 +89,31 @@ def set_config():
 EOF
 }
 
+function create_wrapper_script() {
+    cat <<EOF > "$WRAPPER_SCRIPT"
+#!/bin/bash
+set -e
+
+CONFIG="$CONFIG_FILE"
+[ ! -f "\$CONFIG" ] && echo -e "resolution=1920x1080\nfps=15" > "\$CONFIG"
+
+source "\$CONFIG"
+
+WIDTH="\${resolution%x*}"
+HEIGHT="\${resolution#*x}"
+
+# Start stream in background
+libcamera-vid --inline --framerate "\$fps" --width "\$WIDTH" --height "\$HEIGHT" --codec mjpeg -o - | \
+    cvlc stream:///dev/stdin --sout "#standard{access=http,mux=mpjpeg,dst=:8080/stream.mjpg}" --sout-keep &
+
+# Start Flask UI
+cd "$PROJECT_DIR/app"
+exec $PYTHON server.py
+EOF
+
+    chmod +x "$WRAPPER_SCRIPT"
+}
+
 function create_systemd_service() {
     cat <<EOF | sudo tee /etc/systemd/system/$SERVICE_NAME
 [Unit]
@@ -95,14 +121,7 @@ Description=Security Camera Stream
 After=network.target
 
 [Service]
-ExecStartPre=/bin/bash -c 'CONFIG=\$HOME/.cam_config; [ ! -f \$CONFIG ] && echo -e "resolution=1920x1080\\nfps=15" > \$CONFIG || true'
-ExecStart=/bin/bash -c '
-    source \$HOME/.cam_config
-    libcamera-vid --inline --framerate \$fps --width \${resolution%x*} --height \${resolution#*x} --codec mjpeg -o - | \
-    cvlc stream:///dev/stdin --sout "#standard{access=http,mux=mpjpeg,dst=:$STREAM_PORT/stream.mjpg}" --sout-keep &
-    cd $PROJECT_DIR/app
-    $PYTHON server.py
-'
+ExecStart=$WRAPPER_SCRIPT
 Restart=always
 User=$USER
 
@@ -114,10 +133,11 @@ EOF
 function main_install() {
     install_deps
     create_web_ui
+    create_wrapper_script
     create_systemd_service
     sudo systemctl daemon-reload
-    sudo systemctl enable cam.service
-    sudo systemctl start cam.service
+    sudo systemctl enable $SERVICE_NAME
+    sudo systemctl start $SERVICE_NAME
     echo "===================================="
     echo " ✅  Installed and Running!"
     echo " 🔄  Reboot recommended"
