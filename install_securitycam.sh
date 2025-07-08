@@ -10,8 +10,7 @@ function uninstall() {
     echo "🧹 Uninstalling..."
     sudo systemctl stop cam.service || true
     sudo systemctl disable cam.service || true
-    sudo rm -f /etc/systemd/system/cam.service
-    sudo systemctl daemon-reexec
+    sudo rm -f /etc/systemd/system/$SERVICE_NAME
     sudo systemctl daemon-reload
     rm -rf "$PROJECT_DIR"
     echo "✅ Uninstalled successfully."
@@ -21,18 +20,7 @@ function uninstall() {
 function install_deps() {
     echo "📦 Installing dependencies..."
     sudo apt update
-    sudo apt install -y git cmake libjpeg-dev libv4l-dev \
-        python3 python3-pip libcamera-apps \
-        libcamera-dev libcamera0 \
-        python3-flask
-}
-
-function clone_and_build_streamer() {
-    mkdir -p "$PROJECT_DIR"
-    cd "$PROJECT_DIR"
-    git clone https://github.com/jacksonliam/mjpg-streamer.git streamer
-    cd streamer/mjpg-streamer-experimental
-    make
+    sudo apt install -y libcamera-apps python3 python3-pip python3-flask
 }
 
 function create_web_ui() {
@@ -52,7 +40,7 @@ function create_web_ui() {
     <h1 class="mb-4">📷 SecurityCam</h1>
     <div class="row">
       <div class="col-md-8">
-        <img src="http://{{ host }}:${STREAM_PORT}/?action=stream" class="img-fluid border">
+        <img src="http://{{ host }}:${STREAM_PORT}/stream.mjpg" class="img-fluid border">
       </div>
       <div class="col-md-4">
         <form method="post" action="/set">
@@ -80,6 +68,7 @@ EOF
     cat <<EOF > "$PROJECT_DIR/app/server.py"
 from flask import Flask, render_template, request, redirect
 import os
+import subprocess
 
 app = Flask(__name__)
 config_path = os.path.expanduser("~/.cam_config")
@@ -109,8 +98,8 @@ After=network.target
 ExecStartPre=/bin/bash -c 'CONFIG=\$HOME/.cam_config; [ ! -f \$CONFIG ] && echo -e "resolution=1920x1080\\nfps=15" > \$CONFIG || true'
 ExecStart=/bin/bash -c '
     source \$HOME/.cam_config
-    cd $PROJECT_DIR/streamer/mjpg-streamer-experimental
-    ./mjpg_streamer -i "./input_uvc.so -r \$resolution -f \$fps" -o "./output_http.so -p $STREAM_PORT" &
+    libcamera-vid --inline --framerate \$fps --width \${resolution%x*} --height \${resolution#*x} --codec mjpeg -o - | \
+    cvlc stream:///dev/stdin --sout "#standard{access=http,mux=mpjpeg,dst=:$STREAM_PORT/stream.mjpg}" --sout-keep &
     cd $PROJECT_DIR/app
     $PYTHON server.py
 '
@@ -124,7 +113,6 @@ EOF
 
 function main_install() {
     install_deps
-    clone_and_build_streamer
     create_web_ui
     create_systemd_service
     sudo systemctl daemon-reload
