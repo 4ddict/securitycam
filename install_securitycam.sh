@@ -19,10 +19,11 @@ function uninstall() {
 }
 
 function install_deps() {
+    echo "📦 Installing dependencies..."
     sudo apt update
     sudo apt install -y git cmake libjpeg-dev libv4l-dev \
         python3 python3-pip libcamera-apps \
-        libcamera-utils libcamera-dev libcamera0 \
+        libcamera-dev libcamera0 \
         python3-flask
 }
 
