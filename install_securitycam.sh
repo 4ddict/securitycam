@@ -142,16 +142,14 @@ function main_install() {
     sudo systemctl enable $SERVICE_NAME
     sudo systemctl start $SERVICE_NAME
 
-    IP_ADDR=$(hostname -I | awk '{print $1}')
-
-    echo "===================================="
-    echo " ✅  Installed and Running!"
-    echo " 🔄  Reboot recommended"
-    echo " 🌐  Web UI: http://\$IP_ADDR:${FLASK_PORT}"
-    echo " 📽  Stream: http://\$IP_ADDR:${STREAM_PORT}/stream.mjpg"
-    echo " 🧹  Uninstall: ./install_securitycam.sh --uninstall"
-    echo " ♻️  Reinstall: ./install_securitycam.sh --reinstall"
-    echo "===================================="
+echo "===================================="
+echo " ✅  Installed and Running!"
+echo " 🔄  Reboot recommended"
+echo " 🌐  Web UI: http://$(hostname -I | awk '{print $1}'):${FLASK_PORT}"
+echo " 📽  Stream: http://$(hostname -I | awk '{print $1}'):${STREAM_PORT}/stream.mjpg"
+echo " 🧹  Uninstall: ./install_securitycam.sh --uninstall"
+echo " ♻️  Reinstall: ./install_securitycam.sh --reinstall"
+echo "===================================="
 }
 
 # Handle flags
