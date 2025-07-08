@@ -142,7 +142,7 @@ function main_install() {
     sudo systemctl enable $SERVICE_NAME
     sudo systemctl start $SERVICE_NAME
 
-    IP_ADDR=\$(hostname -I | awk '{print \$1}')
+    IP_ADDR=$(hostname -I | awk '{print $1}')
 
     echo "===================================="
     echo " ✅  Installed and Running!"
