@@ -7,6 +7,9 @@ WRAPPER_SCRIPT="$PROJECT_DIR/run_cam.sh"
 CONFIG_FILE="$HOME/.cam_config"
 PYTHON=$(which python3)
 
+FLASK_PORT=8080
+STREAM_PORT=8081
+
 function uninstall() {
     echo "🧹 Uninstalling..."
     sudo systemctl stop $SERVICE_NAME || true
@@ -42,7 +45,7 @@ function create_web_ui() {
     <h1 class="mb-4">📷 SecurityCam</h1>
     <div class="row">
       <div class="col-md-8">
-        <img src="http://{{ host }}:8080/stream.mjpg" class="img-fluid border">
+        <img src="http://{{ host }}:${STREAM_PORT}/stream.mjpg" class="img-fluid border">
       </div>
       <div class="col-md-4">
         <form method="post" action="/set">
@@ -102,13 +105,13 @@ source "\$CONFIG"
 WIDTH="\${resolution%x*}"
 HEIGHT="\${resolution#*x}"
 
-# Start stream in background
+# Start MJPEG stream in background
 libcamera-vid --inline --framerate "\$fps" --width "\$WIDTH" --height "\$HEIGHT" --codec mjpeg -o - | \
-    cvlc stream:///dev/stdin --sout "#standard{access=http,mux=mpjpeg,dst=:8080/stream.mjpg}" --sout-keep &
+    cvlc stream:///dev/stdin --sout "#standard{access=http,mux=mpjpeg,dst=:${STREAM_PORT}/stream.mjpg}" --sout-keep &
 
-# Start Flask UI
+# Start Flask UI on ${FLASK_PORT}
 cd "$PROJECT_DIR/app"
-exec $PYTHON server.py
+exec $PYTHON server.py --host=0.0.0.0 --port=${FLASK_PORT}
 EOF
 
     chmod +x "$WRAPPER_SCRIPT"
@@ -138,19 +141,23 @@ function main_install() {
     sudo systemctl daemon-reload
     sudo systemctl enable $SERVICE_NAME
     sudo systemctl start $SERVICE_NAME
+
+    IP_ADDR=\$(hostname -I | awk '{print \$1}')
+
     echo "===================================="
     echo " ✅  Installed and Running!"
     echo " 🔄  Reboot recommended"
-    echo " 🌐  Web UI: http://$(hostname -I | awk '{print \$1}'):8080"
+    echo " 🌐  Web UI: http://\$IP_ADDR:${FLASK_PORT}"
+    echo " 📽  Stream: http://\$IP_ADDR:${STREAM_PORT}/stream.mjpg"
     echo " 🧹  Uninstall: ./install_securitycam.sh --uninstall"
     echo " ♻️  Reinstall: ./install_securitycam.sh --reinstall"
     echo "===================================="
 }
 
 # Handle flags
-if [[ "$1" == "--uninstall" ]]; then
+if [[ "\$1" == "--uninstall" ]]; then
     uninstall
-elif [[ "$1" == "--reinstall" ]]; then
+elif [[ "\$1" == "--reinstall" ]]; then
     uninstall
     main_install
 else
