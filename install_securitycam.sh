@@ -1,130 +1,110 @@
 #!/bin/bash
-set -e
 
 PROJECT_DIR="$HOME/securitycam"
-SERVICE_NAME="cam.service"
-WRAPPER_SCRIPT="$PROJECT_DIR/run_cam.sh"
-CONFIG_FILE="$HOME/.cam_config"
-PYTHON=$(which python3)
+SERVICE_NAME="securitycam"
+PORT=8080
 
-FLASK_PORT=8080
-STREAM_PORT=8081
-
-function uninstall() {
-    echo "🧹 Uninstalling..."
-    sudo systemctl stop $SERVICE_NAME || true
-    sudo systemctl disable $SERVICE_NAME || true
-    sudo rm -f /etc/systemd/system/$SERVICE_NAME
-    sudo systemctl daemon-reload
-    rm -rf "$PROJECT_DIR"
-    rm -f "$CONFIG_FILE"
-    echo "✅ Uninstalled successfully."
-    exit 0
+function install_dependencies() {
+  sudo apt update
+  sudo apt install -y python3 python3-pip lighttpd libcamera-apps uv4l
+  pip3 install flask
 }
 
-function install_deps() {
-    echo "📦 Installing dependencies..."
-    sudo apt update
-    sudo apt install -y libcamera-apps vlc python3 python3-pip python3-flask
-}
+function setup_project() {
+  mkdir -p "$PROJECT_DIR"
+  cd "$PROJECT_DIR" || exit 1
 
-function create_web_ui() {
-    mkdir -p "$PROJECT_DIR/app/templates"
-    mkdir -p "$PROJECT_DIR/app/static"
+  # Flask App
+  cat > app.py <<EOF
+from flask import Flask, render_template, request, redirect, url_for
+import os
 
-    cat <<EOF > "$PROJECT_DIR/app/templates/index.html"
+app = Flask(__name__)
+
+CONFIG_FILE = "config.txt"
+
+def read_config():
+    if not os.path.exists(CONFIG_FILE):
+        return {"width": 1920, "height": 1080, "fps": 15}
+    with open(CONFIG_FILE) as f:
+        data = f.read().split(',')
+        return {"width": int(data[0]), "height": int(data[1]), "fps": int(data[2])}
+
+def write_config(config):
+    with open(CONFIG_FILE, 'w') as f:
+        f.write(f"{config['width']},{config['height']},{config['fps']}")
+
+@app.route("/", methods=["GET", "POST"])
+def index():
+    config = read_config()
+    if request.method == "POST":
+        config["width"] = int(request.form["width"])
+        config["height"] = int(request.form["height"])
+        config["fps"] = int(request.form["fps"])
+        write_config(config)
+        os.system("systemctl restart securitycam.service")
+        return redirect(url_for("index"))
+    return render_template("index.html", config=config)
+
+@app.route("/video")
+def video():
+    return redirect(f"http://localhost:8081")
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=$PORT)
+EOF
+
+  # HTML Template
+  mkdir -p templates
+  cat > templates/index.html <<EOF
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>SecurityCam</title>
+  <title>Security Cam</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 </head>
-<body class="bg-light">
-  <div class="container py-4">
-    <h1 class="mb-4">📷 SecurityCam</h1>
-    <div class="row">
-      <div class="col-md-8">
-        <img src="http://{{ host }}:${STREAM_PORT}/stream.mjpg" class="img-fluid border">
-      </div>
-      <div class="col-md-4">
-        <form method="post" action="/set">
-          <div class="mb-3">
-            <label class="form-label">Resolution</label>
-            <select name="resolution" class="form-select">
-              <option value="1920x1080">1920x1080</option>
-              <option value="1280x720">1280x720</option>
-              <option value="640x480">640x480</option>
-            </select>
-          </div>
-          <div class="mb-3">
-            <label class="form-label">FPS</label>
-            <input type="number" name="fps" min="1" max="30" class="form-control" value="15">
-          </div>
-          <button type="submit" class="btn btn-primary">Apply</button>
-        </form>
-      </div>
+<body class="bg-dark text-light">
+  <div class="container py-5">
+    <h1 class="mb-4">📷 Security Camera</h1>
+    <div class="mb-4">
+      <iframe src="/video" width="100%" height="540" frameborder="0"></iframe>
     </div>
+    <form method="POST" class="bg-secondary p-4 rounded">
+      <h4>Settings</h4>
+      <div class="row g-2 mb-3">
+        <div class="col">
+          <label>Width</label>
+          <input type="number" name="width" class="form-control" value="{{ config.width }}">
+        </div>
+        <div class="col">
+          <label>Height</label>
+          <input type="number" name="height" class="form-control" value="{{ config.height }}">
+        </div>
+        <div class="col">
+          <label>FPS</label>
+          <input type="number" name="fps" class="form-control" value="{{ config.fps }}">
+        </div>
+      </div>
+      <button type="submit" class="btn btn-light">Save & Restart</button>
+    </form>
   </div>
 </body>
 </html>
 EOF
 
-    cat <<EOF > "$PROJECT_DIR/app/server.py"
-from flask import Flask, render_template, request, redirect
-import os
-
-app = Flask(__name__)
-config_path = os.path.expanduser("~/.cam_config")
-
-@app.route("/")
-def index():
-    return render_template("index.html", host=request.host.split(":")[0])
-
-@app.route("/set", methods=["POST"])
-def set_config():
-    resolution = request.form.get("resolution", "1920x1080")
-    fps = request.form.get("fps", "15")
-    with open(config_path, "w") as f:
-        f.write(f"resolution={resolution}\\nfps={fps}\\n")
-    os.system("sudo systemctl restart cam.service")
-    return redirect("/")
-EOF
+  # Default config
+  echo "1920,1080,15" > config.txt
 }
 
-function create_wrapper_script() {
-    cat <<EOF > "$WRAPPER_SCRIPT"
-#!/bin/bash
-set -e
-
-CONFIG="$CONFIG_FILE"
-[ ! -f "\$CONFIG" ] && echo -e "resolution=1920x1080\nfps=15" > "\$CONFIG"
-
-source "\$CONFIG"
-
-WIDTH="\${resolution%x*}"
-HEIGHT="\${resolution#*x}"
-
-# Start MJPEG stream in background
-libcamera-vid --inline --framerate "\$fps" --width "\$WIDTH" --height "\$HEIGHT" --codec mjpeg -o - | \
-    cvlc stream:///dev/stdin --sout "#standard{access=http,mux=mpjpeg,dst=:${STREAM_PORT}/stream.mjpg}" --sout-keep &
-
-# Start Flask UI on ${FLASK_PORT}
-cd "$PROJECT_DIR/app"
-exec $PYTHON server.py --host=0.0.0.0 --port=${FLASK_PORT}
-EOF
-
-    chmod +x "$WRAPPER_SCRIPT"
-}
-
-function create_systemd_service() {
-    cat <<EOF | sudo tee /etc/systemd/system/$SERVICE_NAME
+function create_stream_service() {
+  sudo tee /etc/systemd/system/${SERVICE_NAME}.service > /dev/null <<EOF
 [Unit]
-Description=Security Camera Stream
+Description=Security Cam Streaming Service
 After=network.target
 
 [Service]
-ExecStart=$WRAPPER_SCRIPT
+ExecStart=/bin/bash -c 'cd $PROJECT_DIR && ./start_stream.sh'
 Restart=always
 User=$USER
 
@@ -133,31 +113,94 @@ WantedBy=multi-user.target
 EOF
 }
 
-function main_install() {
-    install_deps
-    create_web_ui
-    create_wrapper_script
-    create_systemd_service
-    sudo systemctl daemon-reload
-    sudo systemctl enable $SERVICE_NAME
-    sudo systemctl start $SERVICE_NAME
+function create_stream_script() {
+  cat > "$PROJECT_DIR/start_stream.sh" <<'EOF'
+#!/bin/bash
 
-echo "===================================="
-echo " ✅  Installed and Running!"
-echo " 🔄  Reboot recommended"
-echo " 🌐  Web UI: http://$(hostname -I | awk '{print $1}'):${FLASK_PORT}"
-echo " 📽  Stream: http://$(hostname -I | awk '{print $1}'):${STREAM_PORT}/stream.mjpg"
-echo " 🧹  Uninstall: ./install_securitycam.sh --uninstall"
-echo " ♻️  Reinstall: ./install_securitycam.sh --reinstall"
-echo "===================================="
+cd "$(dirname "$0")" || exit 1
+read -r WIDTH HEIGHT FPS < <(tr ',' ' ' < config.txt)
+
+# Kill old stream
+pkill -f libcamera-vid
+
+# Start new stream
+libcamera-vid -t 0 --inline --width $WIDTH --height $HEIGHT --framerate $FPS -o - | cvlc - --sout '#standard{access=http,mux=ts,dst=:8081}' :demux=h264
+EOF
+  chmod +x "$PROJECT_DIR/start_stream.sh"
 }
 
-# Handle flags
-if [[ "\$1" == "--uninstall" ]]; then
+function create_flask_service() {
+  sudo tee /etc/systemd/system/${SERVICE_NAME}_web.service > /dev/null <<EOF
+[Unit]
+Description=Security Cam Flask Web Server
+After=network.target
+
+[Service]
+WorkingDirectory=$PROJECT_DIR
+ExecStart=/usr/bin/python3 $PROJECT_DIR/app.py
+Restart=always
+User=$USER
+
+[Install]
+WantedBy=multi-user.target
+EOF
+}
+
+function enable_services() {
+  sudo systemctl daemon-reexec
+  sudo systemctl daemon-reload
+  sudo systemctl enable ${SERVICE_NAME}.service
+  sudo systemctl enable ${SERVICE_NAME}_web.service
+  sudo systemctl start ${SERVICE_NAME}.service
+  sudo systemctl start ${SERVICE_NAME}_web.service
+}
+
+function uninstall() {
+  echo "Uninstalling..."
+
+  sudo systemctl stop ${SERVICE_NAME}.service
+  sudo systemctl stop ${SERVICE_NAME}_web.service
+  sudo systemctl disable ${SERVICE_NAME}.service
+  sudo systemctl disable ${SERVICE_NAME}_web.service
+  sudo rm -f /etc/systemd/system/${SERVICE_NAME}*.service
+  sudo systemctl daemon-reload
+
+  rm -rf "$PROJECT_DIR"
+
+  echo "✅ Uninstalled!"
+  exit 0
+}
+
+function reinstall() {
+  uninstall
+  install
+}
+
+function install() {
+  install_dependencies
+  setup_project
+  create_stream_script
+  create_stream_service
+  create_flask_service
+  enable_services
+
+  echo "===================================="
+  echo " ✅  Installed and Running!"
+  echo " 🔄  Reboot recommended"
+  echo " 🌐  Web UI: http://$(hostname -I | awk '{print $1}'):8080"
+  echo " 🧹  Uninstall: ./install_securitycam.sh --uninstall"
+  echo " ♻️  Reinstall: ./install_securitycam.sh --reinstall"
+  echo "===================================="
+}
+
+case "$1" in
+  --uninstall)
     uninstall
-elif [[ "\$1" == "--reinstall" ]]; then
-    uninstall
-    main_install
-else
-    main_install
-fi
+    ;;
+  --reinstall)
+    reinstall
+    ;;
+  *)
+    install
+    ;;
+esac
