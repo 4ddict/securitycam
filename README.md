@@ -36,7 +36,7 @@ Streams live MJPEG video at adjustable resolution and FPS. Includes a Bootstrap-
 ## 🚀 Easy Install (1-liner)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/4ddict/securitycam/main/install_securitycam.sh -o install_securitycam.sh && chmod +x install_securitycam.sh && ./install_securitycam.sh
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/4ddict/securitycam/main/install_securitycam.sh)"
 ```
 
 ---
