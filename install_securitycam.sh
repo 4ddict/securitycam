@@ -6,7 +6,7 @@ PORT=8080
 
 function install_dependencies() {
   sudo apt update
-  sudo apt install -y python3 python3-pip lighttpd libcamera-apps uv4l
+  sudo apt install -y python3 python3-pip python3-venv lighttpd libcamera-apps vlc
   pip3 install flask
 }
 
@@ -48,7 +48,7 @@ def index():
 
 @app.route("/video")
 def video():
-    return redirect(f"http://localhost:8081")
+    return redirect("http://localhost:8081")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=$PORT)
@@ -93,51 +93,46 @@ EOF
 </html>
 EOF
 
-  # Default config
   echo "1920,1080,15" > config.txt
+}
+
+function create_stream_script() {
+  cat > "$PROJECT_DIR/start_stream.sh" <<'EOF'
+#!/bin/bash
+cd "$(dirname "$0")" || exit 1
+read -r WIDTH HEIGHT FPS < <(tr ',' ' ' < config.txt)
+pkill -f libcamera-vid
+libcamera-vid -t 0 --inline --width $WIDTH --height $HEIGHT --framerate $FPS -o - | cvlc - --sout '#standard{access=http,mux=ts,dst=:8081}' :demux=h264
+EOF
+  chmod +x "$PROJECT_DIR/start_stream.sh"
 }
 
 function create_stream_service() {
   sudo tee /etc/systemd/system/${SERVICE_NAME}.service > /dev/null <<EOF
 [Unit]
-Description=Security Cam Streaming Service
+Description=Security Cam Streaming
 After=network.target
 
 [Service]
-ExecStart=/bin/bash -c 'cd $PROJECT_DIR && ./start_stream.sh'
+ExecStart=$PROJECT_DIR/start_stream.sh
 Restart=always
 User=$USER
+WorkingDirectory=$PROJECT_DIR
 
 [Install]
 WantedBy=multi-user.target
 EOF
 }
 
-function create_stream_script() {
-  cat > "$PROJECT_DIR/start_stream.sh" <<'EOF'
-#!/bin/bash
-
-cd "$(dirname "$0")" || exit 1
-read -r WIDTH HEIGHT FPS < <(tr ',' ' ' < config.txt)
-
-# Kill old stream
-pkill -f libcamera-vid
-
-# Start new stream
-libcamera-vid -t 0 --inline --width $WIDTH --height $HEIGHT --framerate $FPS -o - | cvlc - --sout '#standard{access=http,mux=ts,dst=:8081}' :demux=h264
-EOF
-  chmod +x "$PROJECT_DIR/start_stream.sh"
-}
-
-function create_flask_service() {
+function create_web_service() {
   sudo tee /etc/systemd/system/${SERVICE_NAME}_web.service > /dev/null <<EOF
 [Unit]
-Description=Security Cam Flask Web Server
+Description=Security Cam Web UI
 After=network.target
 
 [Service]
-WorkingDirectory=$PROJECT_DIR
 ExecStart=/usr/bin/python3 $PROJECT_DIR/app.py
+WorkingDirectory=$PROJECT_DIR
 Restart=always
 User=$USER
 
@@ -147,7 +142,6 @@ EOF
 }
 
 function enable_services() {
-  sudo systemctl daemon-reexec
   sudo systemctl daemon-reload
   sudo systemctl enable ${SERVICE_NAME}.service
   sudo systemctl enable ${SERVICE_NAME}_web.service
@@ -157,16 +151,13 @@ function enable_services() {
 
 function uninstall() {
   echo "Uninstalling..."
-
   sudo systemctl stop ${SERVICE_NAME}.service
   sudo systemctl stop ${SERVICE_NAME}_web.service
   sudo systemctl disable ${SERVICE_NAME}.service
   sudo systemctl disable ${SERVICE_NAME}_web.service
   sudo rm -f /etc/systemd/system/${SERVICE_NAME}*.service
   sudo systemctl daemon-reload
-
   rm -rf "$PROJECT_DIR"
-
   echo "✅ Uninstalled!"
   exit 0
 }
@@ -181,7 +172,7 @@ function install() {
   setup_project
   create_stream_script
   create_stream_service
-  create_flask_service
+  create_web_service
   enable_services
 
   echo "===================================="
