@@ -13,6 +13,7 @@ Streams live MJPEG video at adjustable resolution and FPS. Includes a Bootstrap-
 - Web UI with adjustable:
   - 🖼 Resolution (1920x1080, 1280x720, etc.)
   - 🎞 Frame rate (FPS)
+  - 🔄 Rotation, brightness, contrast
 - Minimal dependencies for high performance
 - Auto-start on boot using systemd
 - Fully headless installation
@@ -45,7 +46,7 @@ sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/4ddict/securitycam/
 
 ```bash
 chmod +x install_securitycam.sh
-./install_securitycam.sh
+sudo ./install_securitycam.sh
 ```
 
 Use `--uninstall` or `--reinstall` for cleanup or refresh.
@@ -54,9 +55,9 @@ Use `--uninstall` or `--reinstall` for cleanup or refresh.
 
 ## 🌐 Web Interface
 
-- Web stream + settings: [http://YOUR_PI_IP:8080](http://YOUR_PI_IP:8080)
-- MJPEG Stream URL: `http://YOUR_PI_IP:8080/?action=stream`  
-  (Use this with compatible clients like VLC, Scrypted, or Home Assistant)
+- Full Web UI: [http://YOUR_PI_IP:8080](http://YOUR_PI_IP:8080)
+- MJPEG Stream URL: `http://YOUR_PI_IP:8080/video_feed`  
+  (Can be embedded in other dashboards, e.g., Home Assistant)
 
 ---
 
@@ -72,20 +73,23 @@ Use `--uninstall` or `--reinstall` for cleanup or refresh.
 
 ## 📦 What Gets Installed
 
-- `mjpg-streamer` (compiled from source for speed)
+- `libcamera-jpeg` for still capture + MJPEG loop
 - `Flask` (Python3) for web interface
+- `jq` for config parsing (lightweight)
 - Bootstrap 5 for modern UI
-- Systemd unit to run on boot
-- Minimal dependencies (no desktop GUI required)
+- Two systemd services:
+  - `securitycam.service` – Flask Web UI
+  - `securitycam_stream.service` – MJPEG streamer
 
 ---
 
 ## ✅ Status
 
 - ✅ Works headless on Pi Zero 2 W
-- ✅ No manual camera config needed (uses `libcamera`)
-- ✅ Tested on fresh Raspberry Pi OS Lite (Bookworm, May 2025)
+- ✅ No manual camera config needed (auto-enabled on Bookworm)
+- ✅ Tested on fresh Raspberry Pi OS Lite (May 2025)
 - ✅ Fast boot + low CPU usage
+- ✅ MJPEG stream works in any browser or viewer
 
 ---
 
