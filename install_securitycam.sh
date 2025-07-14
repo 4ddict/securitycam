@@ -46,7 +46,7 @@ function reinstall() {
 function install_dependencies() {
   apt update
   apt install -y libcamera-apps python3-pip jq
-  pip3 install flask flask-cors
+  pip3 install flask flask-cors --break-system-packages
 }
 
 function create_project_files() {
